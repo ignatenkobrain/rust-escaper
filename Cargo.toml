@@ -9,7 +9,7 @@ description = "A library for HTML entity encoding and decoding"
 edition = "2018"
 readme = "README.md"
 keywords = ["html", "parsing", "encoding", "decoding", "xml"]
-categories = ["web", "html", "std", "email"]
+categories = ["parsing", "web-programming", "email"]
 
 [dev-dependencies]
 num = "0.1.26"
