@@ -1,9 +1,9 @@
-use std::io::{self, Write, BufRead, Cursor};
 use std::char;
-use self::DecodeState::*;
+use std::io::{self, BufRead, Cursor, Write};
+
 use self::DecodeErrKind::*;
-use io_support::{self, write_char, CharsError};
-use entities::*;
+use self::DecodeState::*;
+use crate::io_support::{self, write_char, CharsError};
 
 #[derive(Debug)]
 pub enum DecodeErrKind {
@@ -38,7 +38,7 @@ impl PartialEq for DecodeErrKind {
             (&PrematureEnd, &PrematureEnd) => true,
             (&IoError(_), &IoError(_)) => true,
             (&EncodingError, &EncodingError) => true,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -51,7 +51,7 @@ pub struct DecodeErr {
     /// Number of characters read from the input before encountering an error
     pub position: usize,
     /// Type of error
-    pub kind: DecodeErrKind
+    pub kind: DecodeErrKind,
 }
 
 #[derive(PartialEq, Eq)]
@@ -61,7 +61,7 @@ enum DecodeState {
     Named,
     Numeric,
     Hex,
-    Dec
+    Dec,
 }
 
 macro_rules! try_parse(
@@ -91,36 +91,71 @@ macro_rules! try_dec_io(
 ///
 /// # Errors
 /// Errors can be caused by IO errors, `reader` producing invalid UTF-8, or by syntax errors.
-pub fn decode_html_rw<R: BufRead, W: Write>(reader: R, writer: &mut W) -> Result<(), DecodeErr> {
+pub fn decode_html_rw<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+    sloppy: bool,
+) -> Result<(), DecodeErr> {
     let mut state: DecodeState = Normal;
-    let mut pos = 0;
     let mut good_pos = 0;
     let mut buf = String::with_capacity(8);
-    for c in io_support::chars(reader) {
+
+    for (pos, c) in io_support::chars(reader).enumerate() {
         let c = match c {
             Err(e) => {
                 let kind = match e {
-                    CharsError::NotUtf8   => EncodingError,
-                    CharsError::Other(io) => IoError(io)
+                    CharsError::NotUtf8 => EncodingError,
+                    CharsError::Other(io) => IoError(io),
                 };
-                return Err(DecodeErr{ position: pos, kind: kind });
+                return Err(DecodeErr {
+                    position: pos,
+                    kind,
+                });
             }
-            Ok(c) => c
+            Ok(c) => c,
         };
         match state {
-            Normal if c == '&' => state = Entity,
+            Normal if c == '&' => {
+                buf.push(c);
+                state = Entity
+            }
             Normal => try_dec_io!(write_char(writer, c), good_pos),
             Entity if c == '#' => state = Numeric,
-            Entity if c == ';' => return Err(DecodeErr{ position: good_pos, kind: UnknownEntity }),
+            Entity if c == ';' => {
+                if sloppy {
+                    buf.clear();
+                } else {
+                    return Err(DecodeErr {
+                        position: good_pos,
+                        kind: UnknownEntity,
+                    });
+                }
+            }
             Entity => {
                 state = Named;
                 buf.push(c);
             }
             Named if c == ';' => {
+                buf.push(c);
                 state = Normal;
-                let ch = try_parse!(decode_named_entity(&buf), good_pos);
-                try_dec_io!(write_char(writer, ch), good_pos);
-                buf.clear();
+
+                match decode_named_entity(&buf) {
+                    Err(reason) => {
+                        if sloppy {
+                            try_dec_io!(writer.write_all(buf.as_bytes()), good_pos);
+                            buf.clear();
+                        } else {
+                            return Err(DecodeErr {
+                                position: good_pos,
+                                kind: reason,
+                            });
+                        }
+                    }
+                    Ok(res) => {
+                        try_dec_io!(writer.write_all(res.as_bytes()), good_pos);
+                        buf.clear();
+                    }
+                }
             }
             Named => buf.push(c),
             Numeric if is_digit(c) => {
@@ -130,27 +165,40 @@ pub fn decode_html_rw<R: BufRead, W: Write>(reader: R, writer: &mut W) -> Result
             Numeric if c == 'x' => state = Hex,
             Dec if c == ';' => {
                 state = Normal;
-                let ch = try_parse!(decode_numeric(&buf, 10), good_pos);
+                let ch = try_parse!(decode_numeric(&buf[1..], 10), good_pos);
                 try_dec_io!(write_char(writer, ch), good_pos);
                 buf.clear();
             }
             Hex if c == ';' => {
                 state = Normal;
-                let ch = try_parse!(decode_numeric(&buf, 16), good_pos);
+                let ch = try_parse!(decode_numeric(&buf[1..], 16), good_pos);
                 try_dec_io!(write_char(writer, ch), good_pos);
                 buf.clear();
             }
             Hex if is_hex_digit(c) => buf.push(c),
             Dec if is_digit(c) => buf.push(c),
-            Numeric | Hex | Dec => return Err(DecodeErr{ position: good_pos, kind: MalformedNumEscape}),
+            Numeric | Hex | Dec => {
+                if sloppy {
+                    buf.clear()
+                } else {
+                    return Err(DecodeErr {
+                        position: good_pos,
+                        kind: MalformedNumEscape,
+                    });
+                }
+            }
         }
-        pos += 1;
+
         if state == Normal {
-            good_pos = pos;
+            good_pos = pos + 1;
         }
     }
-    if state != Normal {
-        Err(DecodeErr{ position: good_pos, kind: PrematureEnd})
+
+    if state != Normal && !sloppy {
+        Err(DecodeErr {
+            position: good_pos,
+            kind: PrematureEnd,
+        })
     } else {
         Ok(())
     }
@@ -172,29 +220,49 @@ pub fn decode_html_rw<R: BufRead, W: Write>(reader: R, writer: &mut W) -> Result
 ///
 /// This function will never return errors with `kind` set to `IoError` or `EncodingError`.
 pub fn decode_html(s: &str) -> Result<String, DecodeErr> {
-    let mut writer = Vec::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut reader = Cursor::new(bytes);
-    let res = decode_html_rw(&mut reader, &mut writer);
+    decode_html_buf(s.as_bytes())
+}
+
+pub fn decode_html_sloppy(s: &str) -> Result<String, DecodeErr> {
+    decode_html_buf_sloppy(s.as_bytes())
+}
+
+pub fn decode_html_buf(buf: impl AsRef<[u8]>) -> Result<String, DecodeErr> {
+    let buf = buf.as_ref();
+    let mut writer = Vec::with_capacity(buf.len());
+    let mut reader = Cursor::new(buf);
+
+    let res = decode_html_rw(&mut reader, &mut writer, false);
     match res {
         Ok(_) => Ok(String::from_utf8(writer).unwrap()),
-        Err(err) => Err(err)
+        Err(err) => Err(err),
     }
 }
 
-fn is_digit(c: char) -> bool { c >= '0' && c <= '9' }
+pub fn decode_html_buf_sloppy(buf: impl AsRef<[u8]>) -> Result<String, DecodeErr> {
+    let buf = buf.as_ref();
+    let mut writer = Vec::with_capacity(buf.len());
+    let mut reader = Cursor::new(buf);
+
+    let res = decode_html_rw(&mut reader, &mut writer, true);
+    match res {
+        Ok(_) => Ok(String::from_utf8(writer).unwrap()),
+        Err(err) => Err(err),
+    }
+}
+
+fn is_digit(c: char) -> bool {
+    c >= '0' && c <= '9'
+}
 
 fn is_hex_digit(c: char) -> bool {
     is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-fn decode_named_entity(entity: &str) -> Result<char, DecodeErrKind> {
-    match NAMED_ENTITIES.binary_search_by(|&(ent, _)| ent.cmp(entity)) {
-        Err(..) => Err(UnknownEntity),
-        Ok(idx) => {
-            let (_, c) = NAMED_ENTITIES[idx];
-            Ok(c)
-        }
+fn decode_named_entity(entity: &str) -> Result<&'static str, DecodeErrKind> {
+    match entities::ENTITIES.iter().find(|e| e.entity == entity) {
+        None => Err(UnknownEntity),
+        Some(ref e) => Ok(e.characters),
     }
 }
 
@@ -202,9 +270,8 @@ fn decode_numeric(esc: &str, radix: u32) -> Result<char, DecodeErrKind> {
     match u32::from_str_radix(esc, radix) {
         Ok(n) => match char::from_u32(n) {
             Some(c) => Ok(c),
-            None => Err(InvalidCharacter)
+            None => Err(InvalidCharacter),
         },
-        Err(..) => Err(MalformedNumEscape)
+        Err(..) => Err(MalformedNumEscape),
     }
 }
-

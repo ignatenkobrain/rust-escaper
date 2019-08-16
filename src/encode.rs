@@ -1,7 +1,7 @@
-use std::io::{self, Write};
 use std::char;
-use io_support::{write_char};
-use entities::*;
+use std::io::{self, Write};
+
+use crate::io_support::write_char;
 
 ///
 /// HTML entity-encode a string.
@@ -22,7 +22,7 @@ use entities::*;
 ///
 /// # Example
 /// ~~~
-/// let encoded = htmlescape::encode_minimal("<em>Hej!</em>");
+/// let encoded = escaper::encode_minimal("<em>Hej!</em>");
 /// assert_eq!(&encoded, "&lt;em&gt;Hej!&lt;/em&gt;");
 /// ~~~
 ///
@@ -32,17 +32,15 @@ use entities::*;
 ///
 /// ~~~
 /// let name = "dummy onmouseover=alert(/XSS/)";    // User input
-/// let tag = format!("<option value={}>", htmlescape::encode_minimal(name));
+/// let tag = format!("<option value={}>", escaper::encode_minimal(name));
 /// // Here `tag` is    "<option value=dummy onmouseover=alert(/XSS/)>"
 /// ~~~
 ///
 /// Use `escape_attribute` for escaping HTML attribute values.
 pub fn encode_minimal(s: &str) -> String {
-    let mut writer = Vec::with_capacity((s.len()/3 + 1) * 4);
-    match encode_minimal_w(s, &mut writer) {
-        Err(_) => panic!(),
-        Ok(_) => String::from_utf8(writer).expect("impossible invalid UTF-8 in output")
-    }
+    let mut writer = Vec::with_capacity((s.len() / 3 + 1) * 4);
+    encode_minimal_w(s, &mut writer).unwrap();
+    String::from_utf8(writer).expect("impossible invalid UTF-8 in output")
 }
 
 ///
@@ -57,8 +55,8 @@ pub fn encode_minimal(s: &str) -> String {
 pub fn encode_minimal_w<W: Write>(s: &str, writer: &mut W) -> io::Result<()> {
     for c in s.chars() {
         match get_entity(c) {
-            None => try!(write_char(writer, c)),
-            Some(entity) => try!(writer.write_all(entity.as_bytes()))
+            None => write_char(writer, c)?,
+            Some(entity) => writer.write_all(entity.as_bytes())?,
         }
     }
     Ok(())
@@ -82,18 +80,15 @@ pub fn encode_minimal_w<W: Write>(s: &str, writer: &mut W) -> io::Result<()> {
 ///
 /// # Example
 /// ~~~
-/// let encoded = htmlescape::encode_attribute("\"No\", he said.");
+/// let encoded = escaper::encode_attribute("\"No\", he said.");
 /// assert_eq!(&encoded, "&quot;No&quot;&#x2C;&#x20;he&#x20;said&#x2E;");
 /// ~~~
 pub fn encode_attribute(s: &str) -> String {
     let mut writer = Vec::with_capacity(s.len() * 3);
-    match encode_attribute_w(s, &mut writer) {
-        Err(_) => panic!(),
-        Ok(_) => String::from_utf8(writer).unwrap()
-    }
+    encode_attribute_w(s, &mut writer).unwrap();
+    String::from_utf8(writer).unwrap()
 }
 
-///
 /// HTML entity-encodes a string, for use in attributes values, to a writer.
 ///
 /// Similar to `encode_attribute`, except that the output is written to a writer rather
@@ -107,23 +102,24 @@ pub fn encode_attribute_w<W: Write>(s: &str, writer: &mut W) -> io::Result<()> {
         let b = c as usize;
         let res = match get_entity(c) {
             Some(entity) => writer.write_all(entity.as_bytes()),
-            None =>
+            None => {
                 if b < 256 && (b > 127 || !is_ascii_alnum(c)) {
                     write_hex(writer, c)
                 } else {
                     write_char(writer, c)
                 }
+            }
         };
-        try!(res);
+        res?;
     }
     Ok(())
 }
 
 fn get_entity(c: char) -> Option<&'static str> {
-    match MINIMAL_ENTITIES.binary_search_by(|&(ec, _)| ec.cmp(&c) ) {
+    match crate::MINIMAL_ENTITIES.binary_search_by(|&(ec, _)| ec.cmp(&c)) {
         Err(..) => None,
         Ok(idx) => {
-            let (_, e) = MINIMAL_ENTITIES[idx];
+            let (_, e) = crate::MINIMAL_ENTITIES[idx];
             Some(e)
         }
     }
@@ -131,15 +127,16 @@ fn get_entity(c: char) -> Option<&'static str> {
 
 fn write_hex<W: Write>(writer: &mut W, c: char) -> io::Result<()> {
     let hex = b"0123456789ABCDEF";
-    try!(writer.write(b"&#x"));
+    writer.write_all(b"&#x")?;
     let n = c as u8;
-    let bytes = [hex[((n & 0xF0) >> 4) as usize],
-                 hex[(n & 0x0F) as usize],
-                 b';'];
+    let bytes = [
+        hex[((n & 0xF0) >> 4) as usize],
+        hex[(n & 0x0F) as usize],
+        b';',
+    ];
     writer.write_all(&bytes)
 }
 
 fn is_ascii_alnum(c: char) -> bool {
     (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
-

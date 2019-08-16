@@ -1,15 +1,19 @@
 [package]
-name = "htmlescape"
-version = "0.3.1"
-authors = [ "Viktor Dahl <pazaconyoman@gmail.com>" ]
+name = "escaper"
+version = "0.1.0"
+authors = [ "dignifiedquire <dignifiedquire@gmail.com>", "Viktor Dahl <pazaconyoman@gmail.com>" ]
 license = "Apache-2.0 / MIT / MPL-2.0"
-repository = "https://github.com/veddan/rust-htmlescape"
+homepage = "https://github.com/dignifiedquire/rust-escaper"
+repository = "https://github.com/dignifiedquire/rust-escaper"
 description = "A library for HTML entity encoding and decoding"
-
-[lib]
-name = "htmlescape"
-path = "src/lib.rs"
+edition = "2018"
+readme = "README.md"
+keywords = ["html", "parsing", "encoding", "decoding", "xml"]
+categories = ["web", "html", "std", "email"]
 
 [dev-dependencies]
 num = "0.1.26"
 rand = "0.3.14"
+
+[dependencies]
+entities = "1.0.1"

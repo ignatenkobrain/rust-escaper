@@ -1,50 +1,49 @@
-use std::io::{Write, Read, Error, ErrorKind};
-use std::io;
 use std::fmt;
+use std::io;
+use std::io::{Error, ErrorKind, Read, Write};
 
 pub fn write_char<W: Write>(writer: &mut W, c: char) -> io::Result<()> {
-    let mut buf = [0u8;4];
+    let mut buf = [0u8; 4];
     let utf8 = encode_char_utf8(c, &mut buf);
     writer.write_all(utf8)
 }
 
-fn encode_char_utf8<'a>(c: char, buf: &'a mut [u8]) -> &'a [u8] {
+fn encode_char_utf8(c: char, buf: &mut [u8]) -> &[u8] {
     let c = c as u32;
     if c <= 0x7f {
         buf[0] = c as u8;
         &buf[..1]
     } else if c <= 0x7ff {
-        buf[1] = 0b10000000 | (c & 0b00111111) as u8;
-        buf[0] = 0b11000000 | ((c >> 6) & 0b00011111) as u8;
+        buf[1] = 0b1000_0000 | (c & 0b0011_1111) as u8;
+        buf[0] = 0b1100_0000 | ((c >> 6) & 0b0001_1111) as u8;
         &buf[..2]
     } else if c <= 0xffff {
-        buf[2] = 0b10000000 | (c & 0b00111111) as u8;
-        buf[1] = 0b10000000 | ((c >> 6) & 0b00111111) as u8;
-        buf[0] = 0b11100000 | ((c >> 12) & 0b00001111) as u8;
+        buf[2] = 0b1000_0000 | (c & 0b0011_1111) as u8;
+        buf[1] = 0b1000_0000 | ((c >> 6) & 0b0011_1111) as u8;
+        buf[0] = 0b1110_0000 | ((c >> 12) & 0b0000_1111) as u8;
         &buf[..3]
     } else {
-        buf[3] = 0b10000000 | (c & 0b00111111) as u8;
-        buf[2] = 0b10000000 | ((c >> 6) & 0b00111111) as u8;
-        buf[1] = 0b10000000 | ((c >> 12) & 0b00111111) as u8;
-        buf[0] = 0b11110000 | ((c >> 18) & 0b00000111) as u8;
+        buf[3] = 0b1000_0000 | (c & 0b0011_1111) as u8;
+        buf[2] = 0b1000_0000 | ((c >> 6) & 0b0011_1111) as u8;
+        buf[1] = 0b1000_0000 | ((c >> 12) & 0b0011_1111) as u8;
+        buf[0] = 0b1111_0000 | ((c >> 18) & 0b0000_0111) as u8;
         &buf[..4]
     }
 }
 
 fn utf8_char_bytes(first: u8) -> usize {
-    if first & 0b10000000 == 0 {
+    if first & 0b1000_0000 == 0 {
         1
-    } else if first & 0b11100000 == 0b11000000 {
+    } else if first & 0b1110_0000 == 0b1100_0000 {
         2
-    } else if first & 0b11110000 == 0b11100000 {
+    } else if first & 0b1111_0000 == 0b1110_0000 {
         3
-    } else if first & 0b11111000 == 0b11110000 {
+    } else if first & 0b1111_1000 == 0b1111_0000 {
         4
     } else {
         0
     }
 }
-
 
 // `Chars` code copied and modified from `std`
 // The reason for doing this is that when using Chars from std, read_one_byte() isn't inlined.
@@ -52,7 +51,7 @@ fn utf8_char_bytes(first: u8) -> usize {
 //  and read_one_byte() should be much more than return buf[idx++] (+ check for end ofc.).
 
 pub struct Chars<R> {
-    inner: R
+    inner: R,
 }
 
 pub fn chars<R: Read>(reader: R) -> Chars<R> {
@@ -79,8 +78,12 @@ impl<R: Read> Iterator for Chars<R> {
             Some(Err(e)) => return Some(Err(CharsError::Other(e))),
         };
         let width = utf8_char_bytes(first_byte);
-        if width == 1 { return Some(Ok(first_byte as char)) }
-        if width == 0 { return Some(Err(CharsError::NotUtf8)) }
+        if width == 1 {
+            return Some(Ok(first_byte as char));
+        }
+        if width == 0 {
+            return Some(Err(CharsError::NotUtf8));
+        }
         let mut buf = [first_byte, 0, 0, 0];
         {
             let mut start = 1;
@@ -115,9 +118,7 @@ fn read_a_byte<R: Read>(reader: &mut R) -> Option<io::Result<u8>> {
 impl fmt::Display for CharsError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            CharsError::NotUtf8 => {
-                "byte stream did not contain valid utf8".fmt(f)
-            }
+            CharsError::NotUtf8 => "byte stream did not contain valid utf8".fmt(f),
             CharsError::Other(ref e) => e.fmt(f),
         }
     }
@@ -137,7 +138,7 @@ mod test {
     }
 
     fn do_test_encode_char_utf8(c: char, expected: &[u8]) {
-        let mut buf = [0u8;4];
+        let mut buf = [0u8; 4];
         let utf8 = encode_char_utf8(c, &mut buf);
         assert_eq!(utf8, expected);
     }

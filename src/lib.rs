@@ -1,8 +1,16 @@
-pub use encode::*;
-pub use decode::*;
+extern crate entities;
 
-mod encode;
+pub use decode::*;
+pub use encode::*;
+
 mod decode;
-mod entities;
+mod encode;
 mod io_support;
 
+pub static MINIMAL_ENTITIES: [(char, &str); 5] = [
+    ('"', "&quot;"),
+    ('&', "&amp;"),
+    ('\'', "&#x27;"),
+    ('<', "&lt;"),
+    ('>', "&gt;"),
+];
