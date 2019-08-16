@@ -8,12 +8,7 @@ matrix:
   allow_failures:
     - rust: nightly
 
-
-before_script:
-  - cargo install clippy
-
 script:
   - cargo fmt --all -- --check
-  - cargo clippy
   - cargo test --verbose
   - cargo build --release
