@@ -1,6 +1,5 @@
 extern crate escaper;
 
-extern crate num;
 extern crate rand;
 
 use std::char;

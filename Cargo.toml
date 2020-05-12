@@ -12,8 +12,7 @@ keywords = ["html", "parsing", "encoding", "decoding", "xml"]
 categories = ["parsing", "web-programming", "email"]
 
 [dev-dependencies]
-num = "0.1.26"
-rand = "0.3.14"
+rand = "0.4"
 
 [dependencies]
 entities = "1.0.1"

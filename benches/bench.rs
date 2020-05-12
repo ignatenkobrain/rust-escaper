@@ -2,7 +2,6 @@
 
 extern crate escaper;
 
-extern crate num;
 extern crate rand;
 extern crate test;
 
